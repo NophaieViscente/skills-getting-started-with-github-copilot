@@ -5,6 +5,7 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -18,6 +19,33 @@ app = FastAPI(title="Mergington High School API",
 current_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
+
+LOG_FILE = os.environ.get("ACTIVITIES_LOG_FILE",
+                          os.path.join(current_dir, "logs", "app.log"))
+
+
+def configure_logging(log_file: str | None = None) -> logging.Logger:
+    log_path = Path(log_file) if log_file else Path(LOG_FILE)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger = logging.getLogger("mergington")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    return logger
+
+logger = configure_logging()
+logger.info("Mergington High School API logger configured")
 
 # In-memory activity database
 activities = {
@@ -80,20 +108,24 @@ activities = {
 
 @app.get("/")
 def root():
+    logger.info("Redirecting root path to static index")
     return RedirectResponse(url="/static/index.html")
 
 
 @app.get("/activities")
 def get_activities():
+    logger.info("Returning full activity list")
     return activities
 
 
 @app.post("/activities/{activity_name}/signup")
 def signup_for_activity(activity_name: str, email: str):
     """Sign up a student for an activity"""
+    logger.info(f"Signup request received for activity={activity_name}, email={email}")
+
     # Validate activity exists
-    
     if activity_name not in activities:
+        logger.warning(f"Activity not found: {activity_name}")
         raise HTTPException(status_code=404, detail="Activity not found")
 
     # Get the specific activity
@@ -101,23 +133,30 @@ def signup_for_activity(activity_name: str, email: str):
 
     # Validate student is not already signed up
     if email in activity["participants"]:
+        logger.warning(f"Duplicate signup attempt for {email} on {activity_name}")
         raise HTTPException(status_code=400, detail="Student already signed up for this activity")
     
     # Add student
     activity["participants"].append(email)
+    logger.info(f"Signed up {email} for {activity_name}")
     return {"message": f"Signed up {email} for {activity_name}"}
 
 
 @app.delete("/activities/{activity_name}/participants")
 def remove_participant(activity_name: str, email: str):
     """Remove a participant from an activity"""
+    logger.info(f"Remove participant request received for activity={activity_name}, email={email}")
+
     if activity_name not in activities:
+        logger.warning(f"Activity not found for removal: {activity_name}")
         raise HTTPException(status_code=404, detail="Activity not found")
 
     activity = activities[activity_name]
 
     if email not in activity["participants"]:
+        logger.warning(f"Participant not found for removal: {email} in {activity_name}")
         raise HTTPException(status_code=404, detail="Participant not found for this activity")
 
     activity["participants"].remove(email)
+    logger.info(f"Removed {email} from {activity_name}")
     return {"message": f"Removed {email} from {activity_name}"}
